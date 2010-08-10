@@ -1,31 +1,44 @@
 require 'rubygems'
 require 'capcake'
-set :webroot_index_template, "index.php.erb"
 set :deploy_via, :copy
 set :copy_exclude, [".git/*"]
-
 set :scm, "git"
-set :application, "application name"
-set :repository, "your git repositiory"
-set :deploy_to, "path to deploy files to"
+set :application, "my_website"
+set :repository, "git@your-git-repo:#{application}.git"
+set :deploy_to, "/var/www/#{application}/httpdocs"
 ssh_options[:forward_agent] = true
 default_run_options[:pty] = true
- 
 set :scm_verbose, true
-
 set :user, "username"
 set :runner, user
-role :web, "yourdomain.com"
-role :app, "yourdomain.com"
-role :db, "yourdomain.com", :primary => true
-# Need to change the default capcake repo as current one is not used anymore
-set :cake_repo, "git://github.com/cakephp/cakephp.git"
-# Set version of cakePHP to check out
-set :cake_branch, "1.3.1"
+role :web, "website.com"
+role :app, "website.com"
+role :db, "website.com", :primary => true
+set :cake_repo, "http://github.com/cakephp/cakephp.git"
+set :cake_branch, "1.3.3"
 set :branch, "tag"
+set :debug_kit_repo, 'http://github.com/cakephp/debug_kit.git'
+set :webroot_index_template, "index.php.erb"
+set :app_symlinks, ["webroot/img", "webroot/files"]
 
-# Add any shared folders to this 
-set :app_symlinks, ["webroot/folder1", "webroot/folder2"]
+# Tasks to run after deploy:setup
+after "deploy:setup", 'debug_kit:setup'
+after  'deploy:setup', 'rehabstudio:symlinks:setup'
+
+# Extra symlinks to create after deployment
+after   'deploy:symlink', 'rehabstudio:symlinks:update'
+after   'deploy:symlink', 'debug_kit:symlink'
+
+namespace :debug_kit do
+	task :setup do
+		run "cd #{shared_path} && git clone --depth 1 #{debug_kit_repo} debug_kit"
+	end
+	
+	task :symlink do
+		run "mkdir -p #{shared_path}/debug_kit"
+		run "ln -s #{shared_path}/debug_kit #{latest_release}/plugins/debug_kit"
+	end
+end
 
 namespace :rehabstudio do
 	namespace :symlinks do
@@ -33,6 +46,8 @@ namespace :rehabstudio do
 		task :setup, :roles => [:web] do
 			if app_symlinks
 				app_symlinks.each { |link| run "mkdir -p #{shared_path}/#{link}" }
+				send(run_method, "chown #{user}:psacln -R #{shared_path}/webroot")
+				#send(run_method, "chown #{user}:psaserv  #{shared_path}/webroot")
 				send(run_method, "chmod 777 -R #{shared_path}/webroot")
 			end
 		end
@@ -48,8 +63,6 @@ namespace :rehabstudio do
 	
 	desc "Overwrite webroot/index.php from template"
 	task :webroot_index, :roles => [:web] do
-		#send(run_method, "rm -f #{current_path}/webroot/index.php")
-		# Should probably find a better location for this template file
 		file = File.join(File.dirname(__FILE__ ), "/../../libs/templates", webroot_index_template)
 		template = File.read(file)
 		buffer = ERB.new(template).result(binding)
@@ -58,6 +71,4 @@ namespace :rehabstudio do
 	end	
 end
 
-before  'deploy:update_code', 'rehabstudio:symlinks:setup'
-after   'deploy:symlink', 'rehabstudio:symlinks:update'
 capcake
